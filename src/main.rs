@@ -292,52 +292,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    info!("Connecting to MQTT broker at {}:{}", mqtt_host, mqtt_port);
-    info!("Subscribing to topic: {}", mqtt_topic);
-
-    // Create MQTT client
-    let mut mqttoptions = MqttOptions::new("laundry-bot", mqtt_host, mqtt_port);
-    mqttoptions.set_keep_alive(Duration::from_secs(60));
-    mqttoptions.set_clean_session(true);
-
-    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
-
-    // Subscribe to the topic
-    client.subscribe(&mqtt_topic, QoS::AtMostOnce).await?;
-
     let mut monitor = DrierMonitor::new(discord_http, discord_channel_id);
 
     info!("Monitoring drier circuit...");
     info!("State machine initialized in UNKNOWN state - will infer state from first reading");
     info!("Prometheus metrics available at http://0.0.0.0:9090/metrics");
 
-    // Process MQTT events
+    // Reconnection loop - recreate client and eventloop on connection errors
     loop {
-        match eventloop.poll().await {
-            Ok(Event::Incoming(rumqttc::Packet::Publish(publish))) => {
-                let payload = String::from_utf8_lossy(&publish.payload);
+        info!("Connecting to MQTT broker at {}:{}", mqtt_host, mqtt_port);
 
-                // Parse the current value
-                match payload.trim().parse::<f64>() {
-                    Ok(current) => {
-                        monitor.process_current(current).await;
-                    }
-                    Err(e) => {
-                        error!("Failed to parse current value '{}': {}", payload, e);
-                    }
-                }
-            }
-            Ok(Event::Incoming(packet)) => {
-                // Handle other incoming packets if needed
-                debug!("Received packet: {:?}", packet);
-            }
-            Ok(Event::Outgoing(_)) => {
-                // Handle outgoing packets if needed
+        // Create MQTT client
+        let mut mqttoptions = MqttOptions::new("laundry-bot", mqtt_host.clone(), mqtt_port);
+        mqttoptions.set_keep_alive(Duration::from_secs(60));
+        mqttoptions.set_clean_session(true);
+
+        let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+
+        // Subscribe to the topic
+        match client.subscribe(&mqtt_topic, QoS::AtMostOnce).await {
+            Ok(_) => {
+                info!("Successfully subscribed to topic: {}", mqtt_topic);
             }
             Err(e) => {
-                error!("MQTT error: {}", e);
-                // Wait a bit before retrying
+                error!("Failed to subscribe to topic: {}", e);
+                warn!("Retrying connection in 5 seconds...");
                 time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        }
+
+        // Process MQTT events until connection error
+        let mut connection_ok = true;
+        while connection_ok {
+            match eventloop.poll().await {
+                Ok(Event::Incoming(rumqttc::Packet::Publish(publish))) => {
+                    let payload = String::from_utf8_lossy(&publish.payload);
+
+                    // Parse the current value
+                    match payload.trim().parse::<f64>() {
+                        Ok(current) => {
+                            monitor.process_current(current).await;
+                        }
+                        Err(e) => {
+                            error!("Failed to parse current value '{}': {}", payload, e);
+                        }
+                    }
+                }
+                Ok(Event::Incoming(rumqttc::Packet::ConnAck(_))) => {
+                    info!("MQTT connection established");
+                }
+                Ok(Event::Incoming(packet)) => {
+                    // Handle other incoming packets if needed
+                    debug!("Received packet: {:?}", packet);
+                }
+                Ok(Event::Outgoing(_)) => {
+                    // Handle outgoing packets if needed
+                }
+                Err(e) => {
+                    error!("MQTT error: {}", e);
+                    connection_ok = false;
+                    warn!("Connection lost, will attempt to reconnect in 5 seconds...");
+                    time::sleep(Duration::from_secs(5)).await;
+                }
             }
         }
     }

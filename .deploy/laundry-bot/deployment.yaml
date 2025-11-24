@@ -30,6 +30,8 @@ spec:
             secretKeyRef:
               name: laundry-bot-secrets
               key: DISCORD_BOT_TOKEN
+        - name: RUST_LOG
+          value: "laundry_bot=debug"
         - name: DISCORD_CHANNEL_ID
           valueFrom:
             secretKeyRef:
