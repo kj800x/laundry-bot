@@ -29,9 +29,9 @@ spec:
           valueFrom:
             secretKeyRef:
               name: laundry-bot-secrets
-              key: discord-bot-token
+              key: DISCORD_BOT_TOKEN
         - name: DISCORD_CHANNEL_ID
           valueFrom:
             secretKeyRef:
               name: laundry-bot-secrets
-              key: discord-channel-id
+              key: DISCORD_CHANNEL_ID
