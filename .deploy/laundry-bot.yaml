@@ -1,0 +1,8 @@
+artifactRepo:
+  owner: kj800x
+  repo: laundry-bot
+  branch: master
+
+team: home-sensors
+kind: worker
+namespace: home-sensors
