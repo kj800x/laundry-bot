@@ -4,13 +4,13 @@ use metrics::{describe_gauge, gauge};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_util::MetricKindMask;
 use rumqttc::{AsyncClient, Event, MqttOptions, QoS};
+use serenity::all::ShardManager;
 use serenity::builder::CreateMessage;
 use serenity::http::Http;
-use serenity::model::id::ChannelId;
 use serenity::model::gateway::ActivityType;
+use serenity::model::id::ChannelId;
 use serenity::model::user::OnlineStatus;
 use serenity::prelude::*;
-use serenity::all::ShardManager;
 use std::env;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -50,7 +50,7 @@ struct DrierMonitor {
     current_cycle_type: Option<CycleType>, // Track current cycle type for presence
     main_dry_notified: bool,
     last_mqtt_message: Arc<RwLock<Instant>>, // Track last MQTT message for timeout detection
-    mqtt_connected: Arc<RwLock<bool>>, // Track MQTT connection status
+    mqtt_connected: Arc<RwLock<bool>>,       // Track MQTT connection status
 }
 
 impl DrierMonitor {
@@ -103,7 +103,9 @@ impl DrierMonitor {
         if !connected || !has_recent_update {
             // Transition to NoConnection state if not already there
             if self.state != DrierState::NoConnection {
-                warn!("MQTT connection lost or no updates for 2+ minutes - entering NoConnection state");
+                warn!(
+                    "MQTT connection lost or no updates for 2+ minutes - entering NoConnection state"
+                );
                 self.previous_state = Some(self.state.clone());
                 self.state = DrierState::NoConnection;
                 self.update_metrics(&self.state);
@@ -183,12 +185,8 @@ impl DrierMonitor {
         if let Some(shard_manager) = &self.discord_shard_manager {
             // Determine status and activity based on state machine
             let (status, activity_name) = match &self.state {
-                DrierState::Unknown => {
-                    (OnlineStatus::Online, "Initializing...")
-                }
-                DrierState::Off => {
-                    (OnlineStatus::Idle, "Idle")
-                }
+                DrierState::Unknown => (OnlineStatus::Online, "Initializing..."),
+                DrierState::Off => (OnlineStatus::Idle, "Idle"),
                 DrierState::On => {
                     // Determine cycle type for activity
                     let activity = if let Some(cycle_type) = &self.current_cycle_type {
@@ -359,7 +357,8 @@ impl DrierMonitor {
                             self.main_dry_notified = true;
                             self.current_cycle_type = Some(CycleType::MainDry);
                             self.update_presence().await;
-                        } else if duration > MAIN_DRY_THRESHOLD && self.current_cycle_type.is_none() {
+                        } else if duration > MAIN_DRY_THRESHOLD && self.current_cycle_type.is_none()
+                        {
                             // Update cycle type if we've determined it's a main dry
                             self.current_cycle_type = Some(CycleType::MainDry);
                             self.update_presence().await;
@@ -373,11 +372,16 @@ impl DrierMonitor {
                 // Process the reading based on the recovered state
                 // Note: check_and_update_connection_state should have already transitioned us out of NoConnection
                 // But handle it here as a safety fallback
-                debug!("Received current reading while in NoConnection state - connection likely restored");
+                debug!(
+                    "Received current reading while in NoConnection state - connection likely restored"
+                );
                 // The connection check should have already handled the state transition,
                 // but if we're still here, process as Unknown state
                 if current >= 1.0 {
-                    info!("State inferred: ON after NoConnection recovery - Current detected: {:.2}A", current);
+                    info!(
+                        "State inferred: ON after NoConnection recovery - Current detected: {:.2}A",
+                        current
+                    );
                     self.cycle_start_time = Some(Instant::now());
                     self.main_dry_notified = false;
                     self.current_cycle_type = None;
@@ -386,7 +390,10 @@ impl DrierMonitor {
                     self.update_metrics(&self.state);
                     self.update_presence().await;
                 } else {
-                    info!("State inferred: OFF after NoConnection recovery - Low current detected: {:.2}A", current);
+                    info!(
+                        "State inferred: OFF after NoConnection recovery - Low current detected: {:.2}A",
+                        current
+                    );
                     self.previous_state = Some(self.state.clone());
                     self.state = DrierState::Off;
                     self.current_cycle_type = None;
@@ -448,18 +455,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Track last MQTT message for timeout detection
     // Initialize to a time in the past so we don't immediately show as connected
-    let last_mqtt_message = Arc::new(RwLock::new(Instant::now() - PRESENCE_TIMEOUT - Duration::from_secs(1)));
+    let last_mqtt_message = Arc::new(RwLock::new(
+        Instant::now() - PRESENCE_TIMEOUT - Duration::from_secs(1),
+    ));
     // Track MQTT connection status
     let mqtt_connected = Arc::new(RwLock::new(false));
 
     // Set up Discord Client with Gateway for presence updates
     let (discord_http, discord_shard_manager) = if let Some(token) = &discord_token {
         info!("Discord integration enabled");
-        let http = Arc::new(Http::new(&token));
+        let http = Arc::new(Http::new(token));
 
         // Create a minimal client for gateway connection
         let intents = serenity::model::gateway::GatewayIntents::empty();
-        let mut client = Client::builder(&token, intents)
+        let mut client = Client::builder(token, intents)
             .await
             .expect("Failed to create Discord client");
 
